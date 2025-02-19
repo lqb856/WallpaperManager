@@ -1,0 +1,26 @@
+{
+  "current_source": "random",
+  "sources": {
+    "today": {
+      "name": "今日壁纸",
+      "templates": {
+        "uhd": "https://bing.img.run/uhd.php",
+        "1080p": "https://bing.img.run/1920x1080.php",
+        "768p": "https://bing.img.run/1366x768.php",
+        "mobile": "https://bing.img.run/m.php"
+      }
+    },
+    "random": {
+      "name": "随机历史",
+      "templates": {
+        "uhd": "https://bing.img.run/rand_uhd.php",
+        "1080p": "https://bing.img.run/rand.php",
+        "768p": "https://bing.img.run/rand_1366x768.php",
+        "mobile": "https://bing.img.run/rand_m.php"
+      }
+    }
+  },
+  "refresh_interval": 0,
+  "resolution": "1080p",
+  "current_wallpaper": "C:\\Users\\lqb\\.wallpaper_cache\\wallpaper_20250219012622.jpg"
+}
