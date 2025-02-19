@@ -1,3 +1,5 @@
+import time
+import pystray
 import requests
 import tkinter as tk
 from tkinter import ttk
@@ -158,65 +160,6 @@ class DisplayDetector:
             logging.error(f"分辨率检测失败: {str(e)}")
             # 最终回退到1080p
             return 1920, 1080
-        
-    def get_primary_monitor_resolution(self):
-        try:
-            hmonitor = ctypes.windll.user32.MonitorFromWindow(0, 1)  # 获取主显示器的句柄
-            class RECT(ctypes.Structure):
-                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
-                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
-            
-            class MONITORINFO(ctypes.Structure):
-                _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", RECT),
-                            ("rcWork", RECT), ("dwFlags", wintypes.DWORD)]
-            
-            info = MONITORINFO()
-            info.cbSize = ctypes.sizeof(MONITORINFO)
-            
-            if ctypes.windll.user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
-                width = info.rcMonitor.right - info.rcMonitor.left
-                height = info.rcMonitor.bottom - info.rcMonitor.top
-                return width, height
-
-            return 1920, 1080  # 失败则返回 1080p
-        except Exception as e:
-            logging.error(f"分辨率检测失败: {str(e)}")
-            # 最终回退到1080p
-            return 1920, 1080
-        
-    def get_primary_monitor_physical_resolution(self):
-        class DEVMODE(ctypes.Structure):
-            _fields_ = [
-                ("dmDeviceName", wintypes.WCHAR * 32),
-                ("dmSpecVersion", wintypes.WORD),
-                ("dmDriverVersion", wintypes.WORD),
-                ("dmSize", wintypes.WORD),
-                ("dmDriverExtra", wintypes.WORD),
-                ("dmFields", wintypes.DWORD),
-                ("dmPositionX", ctypes.c_long),  # 这里用 ctypes.c_long
-                ("dmPositionY", ctypes.c_long),
-                ("dmDisplayOrientation", wintypes.DWORD),
-                ("dmColor", wintypes.DWORD),
-                ("dmDuplex", wintypes.DWORD),
-                ("dmYResolution", wintypes.DWORD),
-                ("dmTTOption", wintypes.DWORD),
-                ("dmCollate", wintypes.DWORD),
-                ("dmFormName", wintypes.WCHAR * 32),
-                ("dmLogPixels", wintypes.WORD),
-                ("dmBitsPerPel", wintypes.DWORD),
-                ("dmPelsWidth", wintypes.DWORD),
-                ("dmPelsHeight", wintypes.DWORD),
-                ("dmDisplayFlags", wintypes.DWORD),
-                ("dmDisplayFrequency", wintypes.DWORD)
-            ]
-
-        devmode = DEVMODE()
-        devmode.dmSize = ctypes.sizeof(DEVMODE)
-        
-        if ctypes.windll.user32.EnumDisplaySettingsW(None, -1, ctypes.byref(devmode)):
-            return devmode.dmPelsWidth, devmode.dmPelsHeight
-
-        return 1920, 1080  # 失败则返回 1080p
 
 class WallpaperManager:
     def __init__(self):
@@ -343,6 +286,9 @@ class WallpaperManager:
 class WallpaperApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        # 隐藏主窗口
+        self.withdraw()
+        
         self.title("智能壁纸管理器 v3.1")
         self.geometry("800x600")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -358,6 +304,41 @@ class WallpaperApp(tk.Tk):
         self.update_ui_state(False)
         self._bind_events()
         self.schedule_auto_refresh()
+        
+        # 创建系统托盘图标
+        self.create_tray_icon()
+        
+    def create_tray_icon(self):
+        """创建系统托盘图标"""
+        menu = (
+            pystray.MenuItem('显示窗口', self.show_window),
+            pystray.MenuItem('退出', self.quit_app)
+        )
+        image = Image.new('RGB', (64, 64), 'white')  # 创建白色图标
+        self.tray_icon = pystray.Icon("wallpaper", image, "壁纸管理器", menu)
+        
+        # 在独立线程运行托盘图标
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            
+        
+    def show_window(self):
+        """显示主窗口"""
+        self.deiconify()
+        self.lift()
+        
+    def quit_app(self):
+        """退出程序时清理资源"""
+        # 取消自动刷新计划
+        if self.auto_refresh_id:
+            self.after_cancel(self.auto_refresh_id)
+        
+        # 等待下载线程结束
+        if self.download_thread and self.download_thread.is_alive():
+            self.download_thread.join(timeout=5)
+            
+        self.destroy()
+        self.tray_icon.stop()
+        os._exit(0)
 
     def create_controls(self):
         """创建控制面板（新增刷新频率选项）"""
@@ -597,16 +578,8 @@ class WallpaperApp(tk.Tk):
             logging.error(f"加载预览图失败: {str(e)}")
 
     def on_close(self):
-        """关闭窗口时清理资源"""
-        # 取消自动刷新计划
-        if self.auto_refresh_id:
-            self.after_cancel(self.auto_refresh_id)
-        
-        # 等待下载线程结束
-        if self.download_thread and self.download_thread.is_alive():
-            self.download_thread.join(timeout=5)
-        
-        self.destroy()
+        """关闭窗口时隐藏到托盘"""
+        self.withdraw()
 
 if __name__ == "__main__":
     try:

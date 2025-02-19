@@ -2,6 +2,7 @@
 Pillow>=9.3.0  # 图像处理（原PIL）
 pywin32>=300    # Windows API集成
 requests>=2.31.0 # HTTP请求库
+pystray>=0.19 # 系统托盘相关
 
 # 以下为Python标准库，通常不需要单独安装
 # ctypes (内置)
