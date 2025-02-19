@@ -41,7 +41,7 @@ pip install pyinstaller
 1. 生成可执行文件：
 
 ```bash
-pyinstaller --noconsole --onefile --icon=icon.ico wallpaper_app.py
+pyinstaller wallpaper_app.py
 ```
 
 > 生成文件位于 `dist/` 目录
