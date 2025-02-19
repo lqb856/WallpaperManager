@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 import ctypes
+from ctypes import wintypes
 import os
 import json
 import logging
@@ -89,39 +90,189 @@ class APIConfigManager:
         """获取数据源选项列表（键值对）"""
         return [(key, self.config["sources"][key]["name"]) for key in self.config["sources"]]
 
+class DisplayDetector:
+    def __init__(self):
+        # Windows API 类型定义
+        self.MONITORINFOF_PRIMARY = 0x1
+        self.SM_CXSCREEN = 0
+        self.SM_CYSCREEN = 1
+
+    def get_primary_resolution(self):
+        """精确获取主显示器物理分辨率（修复版本）"""
+        try:
+            # 定义Windows结构体
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long)
+                ]
+
+            class MONITORINFOEXW(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("rcMonitor", RECT),
+                    ("rcWork", RECT),
+                    ("dwFlags", wintypes.DWORD),
+                    ("szDevice", wintypes.WCHAR * 32)
+                ]
+
+            # 回调函数捕获主显示器
+            primary_rect = None
+            def monitor_enum_proc(hmonitor, hdc, lprect, lparam):
+                nonlocal primary_rect
+                info = MONITORINFOEXW()
+                info.cbSize = ctypes.sizeof(MONITORINFOEXW)
+                if ctypes.windll.user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
+                    if info.dwFlags & self.MONITORINFOF_PRIMARY:
+                        primary_rect = info.rcMonitor
+                return 1
+
+            # 执行显示器枚举
+            callback = ctypes.WINFUNCTYPE(
+                ctypes.c_int, 
+                wintypes.HMONITOR,
+                wintypes.HDC,
+                ctypes.POINTER(RECT),
+                wintypes.LPARAM
+            )(monitor_enum_proc)
+            
+            ctypes.windll.user32.EnumDisplayMonitors(
+                None, None, callback, 0
+            )
+
+            if primary_rect:
+                width = primary_rect.right - primary_rect.left
+                height = primary_rect.bottom - primary_rect.top
+                logging.info(f"主显示器真实分辨率：{width}x{height}")
+                return width, height
+
+            # 回退到系统指标（应返回主显示器分辨率）
+            width = ctypes.windll.user32.GetSystemMetrics(self.SM_CXSCREEN)
+            height = ctypes.windll.user32.GetSystemMetrics(self.SM_CYSCREEN)
+            logging.warning("使用系统指标回退方案")
+            return width, height
+
+        except Exception as e:
+            logging.error(f"分辨率检测失败: {str(e)}")
+            # 最终回退到1080p
+            return 1920, 1080
+        
+    def get_primary_monitor_resolution(self):
+        try:
+            hmonitor = ctypes.windll.user32.MonitorFromWindow(0, 1)  # 获取主显示器的句柄
+            class RECT(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+            
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", RECT),
+                            ("rcWork", RECT), ("dwFlags", wintypes.DWORD)]
+            
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(MONITORINFO)
+            
+            if ctypes.windll.user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
+                width = info.rcMonitor.right - info.rcMonitor.left
+                height = info.rcMonitor.bottom - info.rcMonitor.top
+                return width, height
+
+            return 1920, 1080  # 失败则返回 1080p
+        except Exception as e:
+            logging.error(f"分辨率检测失败: {str(e)}")
+            # 最终回退到1080p
+            return 1920, 1080
+        
+    def get_primary_monitor_physical_resolution(self):
+        class DEVMODE(ctypes.Structure):
+            _fields_ = [
+                ("dmDeviceName", wintypes.WCHAR * 32),
+                ("dmSpecVersion", wintypes.WORD),
+                ("dmDriverVersion", wintypes.WORD),
+                ("dmSize", wintypes.WORD),
+                ("dmDriverExtra", wintypes.WORD),
+                ("dmFields", wintypes.DWORD),
+                ("dmPositionX", ctypes.c_long),  # 这里用 ctypes.c_long
+                ("dmPositionY", ctypes.c_long),
+                ("dmDisplayOrientation", wintypes.DWORD),
+                ("dmColor", wintypes.DWORD),
+                ("dmDuplex", wintypes.DWORD),
+                ("dmYResolution", wintypes.DWORD),
+                ("dmTTOption", wintypes.DWORD),
+                ("dmCollate", wintypes.DWORD),
+                ("dmFormName", wintypes.WCHAR * 32),
+                ("dmLogPixels", wintypes.WORD),
+                ("dmBitsPerPel", wintypes.DWORD),
+                ("dmPelsWidth", wintypes.DWORD),
+                ("dmPelsHeight", wintypes.DWORD),
+                ("dmDisplayFlags", wintypes.DWORD),
+                ("dmDisplayFrequency", wintypes.DWORD)
+            ]
+
+        devmode = DEVMODE()
+        devmode.dmSize = ctypes.sizeof(DEVMODE)
+        
+        if ctypes.windll.user32.EnumDisplaySettingsW(None, -1, ctypes.byref(devmode)):
+            return devmode.dmPelsWidth, devmode.dmPelsHeight
+
+        return 1920, 1080  # 失败则返回 1080p
+
 class WallpaperManager:
     def __init__(self):
         self.api_config = APIConfigManager()
         self.cache_dir = os.path.join(os.path.expanduser("~"), ".wallpaper_cache")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.current_wallpaper = self.api_config.config.get("current_wallpaper", None)
-
+        self.detector = DisplayDetector()
+        self.resolution_map = {
+            (3840, 2160): "uhd",
+            (1920, 1080): "1080p",
+            (1366, 768): "768p",
+            (1080, 1920): "mobile"
+        }
+        
     def get_screen_resolution(self):
-        """使用Windows API获取物理分辨率"""
+        """精确获取主显示器物理分辨率"""
         try:
-            user32 = ctypes.windll.user32
-            width = user32.GetSystemMetrics(0)
-            height = user32.GetSystemMetrics(1)
-            logging.info(f"物理分辨率：{width}x{height}")
-            
-            resolutions = {
+            # 获取实际物理分辨率
+            width, height = self.detector.get_primary_resolution()
+            logging.info(f"当前主显示器：{width}x{height}")
+
+            logging.info(f"检测到物理分辨率：{width}x{height}")
+            resolution_presets = {
                 "uhd": (3840, 2160),
                 "1080p": (1920, 1080),
                 "768p": (1366, 768),
                 "mobile": (1080, 1920)
             }
-            
-            closest = "1080p"
-            min_diff = float('inf')
-            for key, (w, h) in resolutions.items():
-                diff = abs(w - width) + abs(h - height)
-                if diff < min_diff:
-                    min_diff = diff
-                    closest = key
-            return closest
+
+            # 候选方案存储
+            candidates = []
+
+            # 第一阶段：寻找完全匹配
+            for preset_name, (w, h) in resolution_presets.items():
+                if w == width and h == height:
+                    logging.info(f"找到精确匹配：{preset_name}")
+                    return preset_name
+                candidates.append((preset_name, w, h))
+
+            # 第二阶段：寻找更大尺寸的最近匹配
+            larger_candidates = [c for c in candidates if c[1] >= width and c[2] >= height]
+            if larger_candidates:
+                # 按面积差排序（优先最小浪费）
+                larger_candidates.sort(key=lambda x: (x[1]*x[2] - width*height))
+                selected = larger_candidates[0][0]
+                logging.info(f"选择更大尺寸：{selected}")
+                return selected
+
+            # 第三阶段：选择最高分辨率
+            logging.info("无合适尺寸，使用最高分辨率")
+            return "uhd"
+
         except Exception as e:
-            logging.error(f"分辨率检测失败: {str(e)}")
-            return "1080p"
+            logging.error(f"分辨率检测异常：{str(e)}")
+            return "uhd"  # 异常时默认返回最高分辨率
 
     def generate_api_url(self, resolution_type=None):
         """生成API请求URL"""

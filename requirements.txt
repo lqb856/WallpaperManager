@@ -1,0 +1,12 @@
+# 核心依赖
+Pillow>=9.3.0  # 图像处理（原PIL）
+pywin32>=300    # Windows API集成
+requests>=2.31.0 # HTTP请求库
+
+# 以下为Python标准库，通常不需要单独安装
+# ctypes (内置)
+# tkinter (内置)
+# logging (内置)
+# os/sys (内置)
+# threading (内置)
+# datetime (内置)
